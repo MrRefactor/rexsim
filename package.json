@@ -1,0 +1,21 @@
+{
+  "name": "rexsim",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun src/main.ts",
+    "build": "bun build src/main.ts --compile --outfile bin/rexsim",
+    "test": "bun test",
+    "bench": "bun src/bench.ts"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "^1.14.7",
+    "@grpc/proto-loader": "^0.8.1",
+    "protobufjs": "^8.8.1"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.4",
+    "typescript": "^7.0.2"
+  }
+}

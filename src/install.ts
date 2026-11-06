@@ -1,0 +1,92 @@
+import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { basename, join } from "node:path";
+import actionLua from "./rexsim.lua" with { type: "text" };
+
+const requireLine = `require("rexsim")`;
+
+function configDir(): string {
+  const xdg = process.env.XDG_CONFIG_HOME;
+  return xdg ? join(xdg, "rex") : join(homedir(), ".config", "rex");
+}
+
+// install doesn't resolve symlinks in the binary's path, so a path that a
+// package manager keeps stable across upgrades stays in the Lua file.
+export async function install(): Promise<void> {
+  const bin = process.execPath;
+  if (basename(bin) === "bun") {
+    throw new Error("compile rexsim first, as the README shows, then run rexsim install");
+  }
+  const dir = configDir();
+  mkdirSync(dir, { recursive: true });
+  const luaPath = join(dir, "rexsim.lua");
+  writeFileSync(luaPath, `-- rexsim install writes this file. Run it again after moving rexsim.\nlocal BIN = ${luaQuote(bin)}\n${actionLua}`);
+  console.log("wrote", luaPath);
+
+  const initPath = join(dir, "init.lua");
+  let s = readFile(initPath);
+  if (!lines(s).some(isRequire)) {
+    if (s !== "" && !s.endsWith("\n")) s += "\n";
+    writeFileSync(initPath, s + requireLine + "\n");
+    console.log(`added ${requireLine} to ${initPath}`);
+  }
+  await reload();
+  console.log('press shift+cmd+i, or run "Toggle rexsim" from the command palette, beside an agent');
+}
+
+export async function uninstall(): Promise<void> {
+  const dir = configDir();
+  try {
+    unlinkSync(join(dir, "rexsim.lua"));
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+  }
+  const initPath = join(dir, "init.lua");
+  const s = readFile(initPath);
+  const next = lines(s).filter((l) => !isRequire(l)).join("");
+  if (next !== s) {
+    writeFileSync(initPath, next);
+    console.log(`removed ${requireLine} from ${initPath}`);
+  }
+  await reload();
+}
+
+async function reload(): Promise<void> {
+  let detail: string;
+  try {
+    const proc = Bun.spawn(["rex", "config", "reload"], { stdout: "pipe", stderr: "pipe" });
+    const [out, err, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+    detail = code === 0 ? "" : (out + err).trim() || `exit status ${code}`;
+  } catch (err) {
+    detail = (err as Error).message;
+  }
+  if (detail) {
+    console.log(`reload Rex's config yourself with: rex config reload (${detail})`);
+    return;
+  }
+  console.log("reloaded Rex's config");
+}
+
+function readFile(path: string): string {
+  try {
+    return readFileSync(path, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return "";
+    throw err;
+  }
+}
+
+// lines splits s after each newline, keeping them, as Go's strings.Lines does.
+function lines(s: string): string[] {
+  return s.match(/[^\n]*\n|[^\n]+$/g) ?? [];
+}
+
+function isRequire(line: string): boolean {
+  const t = line.trim();
+  return t === requireLine || t.startsWith(requireLine + " --");
+}
+
+function luaQuote(s: string): string {
+  const escapes: Record<string, string> = { "\\": "\\\\", '"': '\\"', "\n": "\\n", "\r": "\\r", "\0": "\\0" };
+  return `"${s.replace(/[\\"\n\r\0]/g, (c) => escapes[c])}"`;
+}
